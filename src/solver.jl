@@ -10,7 +10,8 @@ end
 
 Copy(x::T) where T = T([deepcopy(getfield(x, k)) for k ∈ fieldnames(T)]...)
 
-convert(::Type{Array{Float64, 1}}, d::BoolDistribution)  = [d.p, 1 - d.p]
+convert(::Type{Array{Float64, 1}}, d::BoolDistribution, pomdp)  = [d.p, 1 - d.p]
+convert(::Type{Array{Float64, 1}}, d::DiscreteUniform, pomdp) = [pdf(d, stateindex(pomdp, s)) for s in stage_states(pomdp, 1)]
 
 # Base.getindex(d::BoolDistribution, i::Int64) = i == 1 ? d.p : 1 - d.p
 getindex(d::BoolDistribution, i::Int64) = i == 1 ? d.p : 1 - d.p
@@ -210,109 +211,44 @@ function upper_bound_update(pomdp, b::Belief, Bs, t, r)
 end
 
 function init_belief_space(pomdp, t)
+    # add initial belief to first stage
     # add corner beliefs
     no_states = length(stage_states(pomdp, t))
-    b_init = initialstate(pomdp).d
-    # push!(Γs, [])
+    b_init = convert(Array{Float64, 1}, initialstate(pomdp).d, pomdp)
     if t == 1
         Bs = [Belief(b_init, Inf), [corner_belief(no_states, i) for i in 1:no_states]...]
-        # push!(Bs, [Belief(b_init, Inf)])
-        # push!(BSs, Set{Belief}([Belief(b_init, Inf)]))
-        # for i in 1:no_states
-        #     push!(Bs[1], corner_belief(no_states, i))
-        #     push!(BSs[1], corner_belief(no_states, i))
-        # end
     else
         Bs = [corner_belief(no_states, i) for i in 1:no_states]
-        # push!(Bs, [corner_belief(no_states, i) for i in 1:no_states])
-        # push!(BSs, Set([corner_belief(no_states, i) for i in 1:no_states]))
     end
     BSs = Set(Bs)
-    Γs = []
 
-
-    # bonus beliefs
-    # b = zeros(no_states)
-    # b = Belief(zeros(no_states), Inf)
-    # for s in 1:length(stage_states(pomdp, t))
-    #     b.b[s] = b_init[s]
-    #     b_vec = Belief(b.b ./ sum(b.b), Inf)
-    #     if !in(b_vec, BSs[t])
-    #         # push!(Bs[t], Copy(b ./ sum(b.b)))
-    #         # push!(BSs[t], Copy(b ./ sum(b.b)))
-    #         push!(Bs[t], b_vec)
-    #         push!(BSs[t], b_vec)
-    #     end
-    # end
+    # add bonus beliefs
     b = zeros(no_states)
     b = Belief(zeros(no_states), Inf)
     for s in 1:length(stage_states(pomdp, t))
         b.b[s] = b_init[s]
         b_vec = Belief(b.b ./ sum(b.b), Inf)
         if !in(b_vec, BSs)
-            # push!(Bs[t], Copy(b ./ sum(b.b)))
-            # push!(BSs[t], Copy(b ./ sum(b.b)))
             push!(Bs, b_vec)
             push!(BSs, b_vec)
         end
     end
-    # println(Bs[t])
-    println(Bs)
-    println("init state: ", initialstate(pomdp))
-    println("\n\n\n")
 
-    return Bs, BSs, Γs
+    return Bs, BSs
 end
 
 
 
 function solve(solver::FiVISolver, pomdp::POMDP)
-    # init Belief and Vector Lists
-    # Γs, Bs = Array{AlphaVec}[], Array{Belief}[]
+    # init empty Belief and Alpha Vector Lists and belief space set
     Γs, Bs = [AlphaVec[] for i in 1:horizon(pomdp) + 1], [Belief[] for i in 1:horizon(pomdp) + 1]
+    BSs = [Set{Belief}() for i in 1:horizon(pomdp) + 1]
     vu = 0.
     time_elapsed = 0
 
-    # BSs = Set{Belief}[]
-    BSs = [Set{Belief}() for i in 1:horizon(pomdp) + 1]
-
-    # add initial belief to first stage
-    b_init = initialstate(pomdp).d
+    # initialize belief and alpha vect
     for t in 1:horizon(pomdp) + 1
-        Bs[t], BSs[t], Γs[t] = init_belief_space(pomdp, t)
-        # add corner beliefs
-        # no_states = length(stage_states(pomdp, t))
-        # push!(Γs, [])
-        # if t == 1
-        #     push!(Bs, [Belief(b_init, Inf)])
-        #     push!(BSs, Set{Belief}([Belief(b_init, Inf)]))
-        #     # push!(BSs[1], Belief(b_init, Inf))
-        #     for i in 1:no_states
-        #         push!(Bs[1], corner_belief(no_states, i))
-        #         push!(BSs[1], corner_belief(no_states, i))
-        #     end
-        # else
-        #     push!(Bs, [corner_belief(no_states, i) for i in 1:no_states])
-        #     push!(BSs, Set([corner_belief(no_states, i) for i in 1:no_states]))
-        # end
-        #
-        #
-        # # bonus beliefs
-        # b = zeros(no_states)
-        # b = Belief(zeros(no_states), Inf)
-        # for s in 1:length(stage_states(pomdp, t))
-        #     b.b[s] = b_init[s]
-        #     b_vec = Belief(b.b ./ sum(b.b), Inf)
-        #     if !in(b_vec, BSs[t])
-        #         # push!(Bs[t], Copy(b ./ sum(b.b)))
-        #         # push!(BSs[t], Copy(b ./ sum(b.b)))
-        #         push!(Bs[t], b_vec)
-        #         push!(BSs[t], b_vec)
-        #     end
-        # end
-        println(Bs[t])
-        println("init state: ", initialstate(pomdp))
-        println("\n\n\n")
+        Bs[t], BSs[t] = init_belief_space(pomdp, t)
     end
 
     # ?????????????????????????????????????????????????????????????????????????
