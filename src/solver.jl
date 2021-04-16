@@ -293,19 +293,10 @@ function solve(solver::FiVISolver, pomdp::POMDP)
         Bs, BSs = expand(pomdp, Γs, Bs, BSs, r)
     end
 
-    alphas = Array{Float64, 2}[]
-    as = Array{Float64, 1}[]
-    for t in 1:size(Γs, 1)
-        stage_a_vecs = Γs[t]
-        push!(alphas, Array{Float64, 2}(undef, (length(stage_states(pomdp, t)), size(stage_a_vecs, 1))))
-        push!(as, Array{Float64, 1}(undef, size(stage_a_vecs, 1)))
-        for i in 1:size(stage_a_vecs, 1)
-            alphas[t][:, i] = stage_a_vecs[i].alpha
-            as[t][i] = stage_a_vecs[i].action
-        end
-    end
-
-    policy = StagedAlphaVectorPolicy(pomdp, alphas, as)
+    staged_policies = [AlphaVectorPolicy(pomdp.m, length(stage_states(pomdp, t)), [a.alpha for a in Γs[t]],
+                                convert(Vector{actiontype(pomdp)}, [a.action for a in Γs[t]])) for t in 1:size(Γs, 1)]
+    
+    policy = StagedPolicy(pomdp, staged_policies)
 
     return policy, vu
 end
