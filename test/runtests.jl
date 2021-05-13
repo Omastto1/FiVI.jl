@@ -1,6 +1,7 @@
 using Test
 using LinearAlgebra: dot
 using Random
+using Distributions
 using POMDPs
 using FiniteHorizonPOMDPs
 using POMDPModelTools
@@ -11,7 +12,14 @@ using PointBasedValueIteration
 
 import Base.convert
 import FiVI: backup, prob_o_given_b_a, b_o_a, init_belief_space, upper_bound_update, UB, corner_belief, z_k_t_a_o
+import FiniteHorizonPOMDPs: InStageDistribution, FixedHorizonPOMDPWrapper
 
+function convert_pbvi(::Type{Array{Float64, 1}}, b::FiniteHorizonPOMDPs.InStageDistribution{Array{Float64, 1}}, pomdp)
+    belief = zeros(length(states(pomdp)))
+    no_states = length(stage_states(pomdp, 1))
+    belief[1 + (b.stage - 1) * no_states : b.stage * no_states] .= b.d
+    return belief
+end
 
 #test elementary part of backup
 @testset "FiVI" begin
@@ -81,12 +89,7 @@ end
     @test isapprox(v, 5.7)
 end
 
-function Base.convert(::Type{Array{Float64, 1}}, b::FiniteHorizonPOMDPs.InStageDistribution{Array{Float64, 1}}, pomdp)
-    belief = zeros(length(states(pomdp)))
-    no_states = length(stage_states(pomdp, 1))
-    belief[1 + (b.stage - 1) * no_states : b.stage * no_states] .= b.d
-    return belief
-end
+
 
 @testset "Comparison with PBVI" begin
     pomdps = [fixhorizon(MiniHallway(), 5)]
@@ -137,11 +140,8 @@ end
 
             fivi_vs = [value(policy, b.d, b.stage) for b in reachable_beliefs_dist]
             pbvi_vs = [value(pbvi_policy,
-                        convert(Array{Float64, 1},
+                        convert_pbvi(Array{Float64, 1},
                         b, pomdp)) for b in reachable_beliefs_dist]
-
-            @show fivi_vs
-            @show pbvi_vs
 
             @test isapprox(fivi_vs, pbvi_vs, rtol=.1)
         end
