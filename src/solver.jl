@@ -1,12 +1,61 @@
+"""
+    FiVISolver <: Solver
+
+Options dictionary for Point-Based Value Iteration for POMDPs.
+
+# Fields
+- `precision::Float64` formula coefficient determining maximum gap between upper and lower bounds
+- `time_limit::Int64` the solver is terminated after the iteration that exceeds the time limit
+"""
 struct FiVISolver <: Solver
     precision::Float64
     time_limit::Int64
 end
 
+function FiVISolver(;precision::Float64=1., time_limit::Int64=10.)
+    return FiVISolver(precision, time_limit)
+end
+
+"""
+    Belief
+
+Pair of belief and corresponding value upper bound.
+
+# Fields
+- `b` belief vector
+- `v` upper bound value corresponding to `b`
+"""
 mutable struct Belief
     b::Vector{Float64}
     v::Float64
 end
+
+function Belief(d::BoolDistribution, v::Float64)
+    Belief(convert(Array{Float64, 1}, d), v)
+end
+
+==(a::Belief, b::Belief) = a.b == b.b
+hash(b::Belief) = hash(b.b)
+
+"""
+    AlphaVec
+
+Pair of alpha vector and corresponding action.
+
+# Fields
+- `alpha` α vector
+- `action` action corresponding to α vector
+"""
+struct AlphaVec
+    alpha::Vector{Float64} # alpha vector
+    action::Any # action associated wtih alpha vector
+end
+
+AlphaVec() = AlphaVec([0.0], 0)
+
+# define alpha vector equality
+Base.hash(a::AlphaVec, h::UInt) = hash(a.alpha, hash(a.action, h))
+==(a::AlphaVec, b::AlphaVec) = (a.alpha,a.action) == (b.alpha, b.action)
 
 Copy(x::T) where T = T([deepcopy(getfield(x, k)) for k ∈ fieldnames(T)]...)
 
@@ -19,33 +68,14 @@ convert(::Type{Array{Float64, 1}}, d::InStageDistribution{SparseCat},
 
 getindex(d::BoolDistribution, i::Int64) = i == 1 ? d.p : 1 - d.p
 
-function Belief(d::BoolDistribution, v::Float64)
-    Belief(convert(Array{Float64, 1}, d), v)
+# creates a corner belief - belief that is deterministic in a given state
+function corner_belief(no_states, n)
+    b = zeros(no_states)
+    b[n] = 1.
+    return Belief(b, Inf)
 end
 
-==(a::Belief, b::Belief) = a.b == b.b
-hash(b::Belief) = hash(b.b)
-
-"""
-    AlphaVec
-Alpha vector type of paired vector and action.
-"""
-struct AlphaVec
-    alpha::Vector{Float64} # alpha vector
-    action::Any # action associated wtih alpha vector
-end
-
-"""
-    AlphaVec(vector, action_index)
-Create alpha vector from `vector` and `action_index`.
-"""
-AlphaVec() = AlphaVec([0.0], 0)
-
-# define alpha vector equality
-Base.hash(a::AlphaVec, h::UInt) = hash(a.alpha, hash(a.action, h))
-==(a::AlphaVec, b::AlphaVec) = (a.alpha,a.action) == (b.alpha, b.action)
-
-
+# calculates the probability of observation given action and belief
 # P(o|b, a) = ∑(sp∈S) P(o|a, sp) ∑(s∈S) P(sp|s, a) * b(s)
 function prob_o_given_b_a(pomdp, t, b::Array{Float64}, a, o)
     pr_o_given_b_a = 0.
@@ -57,12 +87,7 @@ function prob_o_given_b_a(pomdp, t, b::Array{Float64}, a, o)
     return pr_o_given_b_a
 end
 
-function corner_belief(no_states, n)
-    b = zeros(no_states)
-    b[n] = 1
-    return Belief(b, Inf)
-end
-
+# updates belief with a result of executing a given action `a` and obtaining observation `o`
 function b_o_a(pomdp, t, b::Vector{Float64}, a, o, p_o_given_ba)
     b_new = zeros(length(stage_states(pomdp, t + 1)))
     for sp in stage_states(pomdp, t + 1)
@@ -77,6 +102,7 @@ function b_o_a(pomdp, t, b::Vector{Float64}, a, o, p_o_given_ba)
     return b_new
 end
 
+# Sawtooth belief upper bound interpolation
 function UB(bp::Array{Float64}, Bs)
     f = []
     c = []
@@ -111,6 +137,8 @@ function UB(bp::Array{Float64}, Bs)
     return c[b_opt] * f[b_opt] + dot(bp, vs)
 end
 
+# Expand procedure expanding each staged belief space with a
+# belief that reduces the resulting gap the most effectively
 function expand(pomdp, Γs, Bs, BSs, r)
     b = Bs[1][1].b
     for t in 1:horizon(pomdp) - 1
@@ -155,6 +183,8 @@ function expand(pomdp, Γs, Bs, BSs, r)
     return deepcopy(Bs), deepcopy(BSs)
 end
 
+# does not need control isterminal() because the probability of terminal state in stage t has to be also moved to stage t + 1
+# backprojection of a vector `α^{k,t}` ∈ `Γ[t]` with a given action `a` and osbervation `o`
 function z_k_t_a_o(pomdp, a, o, t, α)
     z = zeros(length(stage_states(pomdp, t)))
     for s in stage_states(pomdp, t)
@@ -164,7 +194,7 @@ function z_k_t_a_o(pomdp, a, o, t, α)
     return z
 end
 
-
+# finds the best α vector for a given action 'a'
 function z(pomdp, b::Array{Float64}, a, t, Γ, r)
     # i think this can be vectorized with r.(s, a)
     r = [r(s, a) for s in ordered_stage_states(pomdp, t)] .* b
@@ -182,13 +212,12 @@ function z(pomdp, b::Array{Float64}, a, t, Γ, r)
     end
 end
 
-
+# backups a given belief `b` with an α-vector maximizing its dot product with belief
 function backup(pomdp, b::Array{Float64}, t, Γ, r)
     zs = [z(pomdp, b, a, t, Γ, r) for a in ordered_actions(pomdp)]
     idx = argmax([dot(b, z) for z in zs])
     return AlphaVec(zs[idx], ordered_actions(pomdp)[idx])
 end
-
 
 function upper_bound_update(pomdp, b::Belief, Bs, t, r)
     b.v = -Inf
@@ -257,7 +286,6 @@ function init_belief_space(pomdp, t)
 end
 
 
-
 function solve(solver::FiVISolver, pomdp::POMDP)
     if typeof(HorizonLength(pomdp)) == InfiniteHorizon
         throw(ArgumentError("Argument pomdp should be valid Finite Horizon POMDP with methods from FiniteHorizonPOMDPs.jl interface implemented. If you are completely sure that you implemented all of them, you should also check if you have defined HorizonLength(::Type{<:MyFHMDP})"))
@@ -274,8 +302,9 @@ function solve(solver::FiVISolver, pomdp::POMDP)
     end
 
     # ?????????????????????????????????????????????????????????????????????????
-    # r = StateActionReward(pomdp)
-    r = LazyCachedSAR(pomdp)
+    r = StateActionReward(pomdp)
+    println("asd\n")
+    # r = LazyCachedSAR(pomdp)
 
     # set upper bound for belief points in t=T
     for b in Bs[horizon(pomdp) + 1]
