@@ -10,10 +10,13 @@ end
 
 Copy(x::T) where T = T([deepcopy(getfield(x, k)) for k ∈ fieldnames(T)]...)
 
-convert(::Type{Array{Float64, 1}}, d::BoolDistribution, pomdp)  = [d.p, 1 - d.p]
-convert(::Type{Array{Float64, 1}}, d::DiscreteUniform, pomdp) = [pdf(d, stateindex(pomdp, s)) for s in stage_states(pomdp, 1)]
+convert(::Type{Array{Float64, 1}}, d::InStageDistribution{BoolDistribution},
+            pomdp::FixedHorizonPOMDPWrapper)  = [d.d.p, 1 - d.d.p]
+convert(::Type{Array{Float64, 1}}, d::InStageDistribution{DiscreteUniform},
+            pomdp::FixedHorizonPOMDPWrapper) = [pdf(d, s) for s in stage_states(pomdp, stage(d))]
+convert(::Type{Array{Float64, 1}}, d::InStageDistribution{SparseCat},
+            pomdp::FixedHorizonPOMDPWrapper) = vec([pdf(d, s) for s in stage_states(pomdp, stage(d))])
 
-# Base.getindex(d::BoolDistribution, i::Int64) = i == 1 ? d.p : 1 - d.p
 getindex(d::BoolDistribution, i::Int64) = i == 1 ? d.p : 1 - d.p
 
 function Belief(d::BoolDistribution, v::Float64)
@@ -70,7 +73,7 @@ function b_o_a(pomdp, t, b::Vector{Float64}, a, o, p_o_given_ba)
 
         b_new[stage_stateindex(pomdp, sp)] = pdf(observation(pomdp, a, sp), o) / p_o_given_ba * b_temp
     end
-    println("boa new: $(b_new)")
+
     return b_new
 end
 
@@ -111,7 +114,6 @@ end
 function expand(pomdp, Γs, Bs, BSs, r)
     b = Bs[1][1].b
     for t in 1:horizon(pomdp) - 1
-        # println("b: ", b)
         as = []
         for a in ordered_actions(pomdp)
             a_temp = 0.
@@ -141,7 +143,7 @@ function expand(pomdp, Γs, Bs, BSs, r)
 
         max_o = os[argmax(os_v)]
 
-        boa =  Belief(b_o_a(pomdp, t, b, max_a, max_o, prob_o_given_b_a(pomdp, t, b, max_a, max_o)), Inf)
+        boa = Belief(b_o_a(pomdp, t, b, max_a, max_o, prob_o_given_b_a(pomdp, t, b, max_a, max_o)), Inf)
 
         if !in(boa, BSs[t+1])
             push!(Bs[t+1], boa)
@@ -181,7 +183,7 @@ function z(pomdp, b, a, t, Γ, r)
 end
 
 
-function backup(pomdp, b, t, Γ, r)
+function backup(pomdp, b::Array{Float64}, t, Γ, r)
     zs = [z(pomdp, b, a, t, Γ, r) for a in ordered_actions(pomdp)]
     idx = argmax([dot(b, z) for z in zs])
     return AlphaVec(zs[idx], ordered_actions(pomdp)[idx])
@@ -197,13 +199,11 @@ function upper_bound_update(pomdp, b::Belief, Bs, t, r)
             for o in stage_observations(pomdp, t)
                 pr_o_given_b_a = prob_o_given_b_a(pomdp, t, b.b, a, o)
                 if pr_o_given_b_a > 0.
-                    println(UB(b_o_a(pomdp, t, b.b, a, o, pr_o_given_b_a), Bs))
                     v_temp += pr_o_given_b_a * UB(b_o_a(pomdp, t, b.b, a, o, pr_o_given_b_a), Bs)
                 end
             end
         end
 
-        println("values: $(b.v), $(v_temp)")
         b.v = max(b.v, v_temp)
     end
 
@@ -214,23 +214,42 @@ function init_belief_space(pomdp, t)
     # add initial belief to first stage
     # add corner beliefs
     no_states = length(stage_states(pomdp, t))
-    b_init = convert(Array{Float64, 1}, initialstate(pomdp).d, pomdp)
+    b_init = convert(Array{Float64, 1}, initialstate(pomdp), pomdp)
+
     if t == 1
-        Bs = [Belief(b_init, Inf), [corner_belief(no_states, i) for i in 1:no_states]...]
+        if any(b_init .== 1.)
+            Bs = [corner_belief(no_states, i) for i in 1:no_states]
+        else
+            Bs = [Belief(b_init, Inf), [corner_belief(no_states, i) for i in 1:no_states]...]
+        end
     else
         Bs = [corner_belief(no_states, i) for i in 1:no_states]
     end
     BSs = Set(Bs)
+    old_size = length(BSs)
 
     # add bonus beliefs
     b = zeros(no_states)
     b = Belief(zeros(no_states), Inf)
     for s in 1:length(stage_states(pomdp, t))
         b.b[s] = b_init[s]
-        b_vec = Belief(b.b ./ sum(b.b), Inf)
-        if !in(b_vec, BSs)
-            push!(Bs, b_vec)
-            push!(BSs, b_vec)
+        sm = sum(b.b)
+        if sm > 0.
+            b_vec = Belief(b.b ./ sum(b.b), Inf)
+            if !in(b_vec, BSs)
+                push!(Bs, b_vec)
+                push!(BSs, b_vec)
+            end
+        end
+    end
+
+    # if no bonus beliefs were added meaning all beliefs are corner belifs
+    if any(b_init .== 1.)
+        len = length(stage_states(pomdp, t))
+        b = Belief(fill(1/len, len), Inf)
+        if !in(b, BSs)
+            push!(Bs, b)
+            push!(BSs, b)
         end
     end
 
@@ -255,7 +274,7 @@ function solve(solver::FiVISolver, pomdp::POMDP)
     # r = StateActionReward(pomdp)
     r = LazyCachedSAR(pomdp)
 
-    # set upper bound for bleief points in t=T
+    # set upper bound for belief points in t=T
     for b in Bs[horizon(pomdp) + 1]
         b.v = 0
     end
@@ -275,15 +294,13 @@ function solve(solver::FiVISolver, pomdp::POMDP)
                 b.v = upper_bound_update(pomdp, b, Bs[t + 1], t, r)
             end
         end
+        # τ' <- time elapsed after start of alg.
         time_elapsed += time
         println("time: ($(time_elapsed))")
 
-        # println("Γs[1]: ", Γs[1])
-        # println("Bs[1][1].v: ", Bs[1][1])
         vl = max([dot(α.alpha, Bs[1][1].b) for α in Γs[1]]...)
         vu = Bs[1][1].v
         g_a = 10 ^ (ceil(log10(max(abs(vl), abs(vu)))) - solver.precision)
-        # τ' <- time elapsed after start of alg.
 
 
         println("\n\n\nvu: ", vu, ", vl: ", vl, "vu - vl = ", vu - vl, ", g_a = ", g_a, "\n\n\n")
