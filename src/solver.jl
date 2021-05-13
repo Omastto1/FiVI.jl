@@ -259,9 +259,12 @@ end
 
 
 function solve(solver::FiVISolver, pomdp::POMDP)
+    if typeof(HorizonLength(pomdp)) == InfiniteHorizon
+        throw(ArgumentError("Argument pomdp should be valid Finite Horizon POMDP with methods from FiniteHorizonPOMDPs.jl interface implemented. If you are completely sure that you implemented all of them, you should also check if you have defined HorizonLength(::Type{<:MyFHMDP})"))
+    end
+
     # init empty Belief and Alpha Vector Lists and belief space set
-    Γs, Bs = [AlphaVec[] for i in 1:horizon(pomdp) + 1], [Belief[] for i in 1:horizon(pomdp) + 1]
-    BSs = [Set{Belief}() for i in 1:horizon(pomdp) + 1]
+    Γs, Bs, BSs = [AlphaVec[] for i in 1:horizon(pomdp) + 1], [Belief[] for i in 1:horizon(pomdp) + 1], [Set{Belief}() for i in 1:horizon(pomdp) + 1]
     vu = 0.
     time_elapsed = 0
 
