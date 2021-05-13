@@ -314,8 +314,8 @@ function solve(solver::FiVISolver, pomdp::POMDP)
     end
 
     staged_policies = [AlphaVectorPolicy(pomdp.m, length(stage_states(pomdp, t)), [a.alpha for a in Γs[t]],
-                                convert(Vector{actiontype(pomdp)}, [a.action for a in Γs[t]])) for t in 1:size(Γs, 1)]
-    
+                                convert(Vector{actiontype(pomdp)}, [a.action for a in Γs[t]])) for t in 1:horizon(pomdp)]
+
     policy = StagedPolicy(pomdp, staged_policies)
 
     return policy, vu
