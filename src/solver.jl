@@ -165,9 +165,9 @@ function z_k_t_a_o(pomdp, a, o, t, α)
 end
 
 
-function z(pomdp, b, a, t, Γ, r)
+function z(pomdp, b::Array{Float64}, a, t, Γ, r)
     # i think this can be vectorized with r.(s, a)
-    r = [r(s, a) for s in stage_states(pomdp, t)] .* b
+    r = [r(s, a) for s in ordered_stage_states(pomdp, t)] .* b
     if t == horizon(pomdp)
         return r
     else
