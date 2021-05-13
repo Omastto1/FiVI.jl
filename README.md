@@ -4,7 +4,7 @@
 [![Coverage Status](https://coveralls.io/repos/github/Omastto1/FiVI.jl/badge.svg?branch=master)](https://coveralls.io/github/Omastto1/FiVI.jl?branch=master)
 [![codecov](https://codecov.io/gh/Omastto1/FiVI.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/Omastto1/FiVI.jl)
 
-The package implement finite horizon point-based value iteration algorithm in Julia for solving finite horizon partially observable Markov decision  processes (FH POMDPs). The user should define the problem with [POMDPs.jl](https://github.com/JuliaPOMDP/POMDPs.jl) and [FiniteHorizonPOMDPs.jl](https://github.com/JuliaPOMDP/FiniteHorizonPOMDPs.jl) interfaces.
+The package implement finite horizon point-based value iteration algorithm ([Walraven and Spaan, 2019](https://www.st.ewi.tudelft.nl/mtjspaan/pub/Walraven19jair.pdf)) in Julia for solving finite horizon partially observable Markov decision  processes (FH POMDPs). The user should define the problem with [POMDPs.jl](https://github.com/JuliaPOMDP/POMDPs.jl) and [FiniteHorizonPOMDPs.jl](https://github.com/JuliaPOMDP/FiniteHorizonPOMDPs.jl) interfaces.
 
 ## Installation
 
